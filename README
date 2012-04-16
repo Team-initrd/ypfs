@@ -1,0 +1,58 @@
+Your Picture File System
+
+Keeping pictures organized is a persistent problem that many people have to face.  One approach is to provide application software that scans your hard drive in order to find all possible picture files and then either copy them into an application-specified location or to simply note where they are and generate metadata so the application can find them again.  Many such applications exist, both free and commercially available.
+
+However, it is now clear that certain operations are universal from a user's perspective -- the ability to sort by the date the picture was taken, or by a geotagged location, or by a recognized face.  In the finest tradition of Operating Systems design, for this assignment you are therefore going to take this new abstraction of a picture file and design a file system that reflects some of the distinctions in how a user wants to interact with pictures as opposed to other data that might reside in a file system.
+YPFS Features
+
+ This assignment is reasonably open-ended, and there is room for considerable innovation on your part.  The minimum requirements are listed below, but feel free to be creative and go above and beyond.
+
+A sample of the expected directory structure is provided below:
+
+./Dates
+
+-->/2009
+
+-->/2008
+
+-->-->/January
+
+-->-->/February
+
+-->-->-->/Pic1.jpg
+
+-->-->-->/Pic2.jpg
+
+
+And the following should complete correctly:
+
+cp ./Dates/2008/February/Pic1.jpg /newpics
+
+At a minimum, here are some of the features that YPFS should be expected to support:
+
+    Automatic Sorting.  Pictures should be only copied into the root level of the file system.  I.E.  If you have mounted it at ~/MyPFS in your home directory, you would just copy pictures to that directory, not any subdirectories.  YPFS should not display them there, though -- it should automatically move/link the file to the appriate subdirectories.
+    Sorting by date taken.  For pictures that have EXIF headers, they should be read.  For other pictures, the date the file was created should be used instead. 
+    Clean Back-end Storage.  You won't be implementing a full file system, so any files in ~/MyPFS will have to have a representation in a back-end store. Conceptually, this could be anything -- a database, a magic file in /tmp, a hidden ~/.mypics directory. However, implement this so that the picture repository will in fact be stored in the directory that you are mounting it over.  ie  if you do not mount your fuse file system, all of the relevant data should be accessible in the regular directory ~MyPFS.  
+        Special note:  This does not mean that the pictures themselves need to be stored in that underlying directory.  You might, for example,  push all of the pictures to flickr and just store the correct URL contact strings and access time metadata in the ~MyPFS directory.
+    Type portability.  The difference between gif, jpg, png, etc. are technological, not having to do with the nature of a picture.  So if a file IMG00923.jpg has been copied into the file system and it has been classified as Dates/2010/March/Pic3.jpg, you should also be able to access Pic2.gif or Pic2.png without error.
+
+Tools
+
+ You will be using the FUSE toolkit to implement your file system for this project.  Accessing complex libraries (like those needed to read the exif headers) from the kernel is problematic, and FUSE helps to solve this.  FUSE, in essence, brings a bit of microkernel to the Linux macrokernel.  It implements the Linux virtual file system interface in the kernel by providing callback functions to a registered userspace program.  The userspace daemon can then perform the action as requested and supply the updates to the inodes, directory structures, etc. through a set of provided functions.
+
+You can go and dowload FUSE and build and install it for your 2.6.24 kernel if you like.  However, a package for the redhat kernel already exists and has been installed for your use on all of the factors.  There are a number of tutorials and hello world examples to read online about how to get started with fuse.  Useful pages to start with are
+
+http://fuse.sourceforge.net/  -- The main page for all things fuse.
+
+http://fuse.sourceforge.net/helloworld.html  -- a simple hello world
+
+EXIF data is something that you can use pre-existing implementations to access.  For example, libexif (http://libexif.sourceforge.net/) or exiv2 (http://www.exiv2.org/) are both good solutions.
+
+ 
+Report
+
+You will need to turn in an implementation of YPFS along with a report detailing its design and implications for reliablity etc, mesurements of performance, and future enhancement potential.  You will be provided an initial selection of pictures, but a key performance metric will be scalability to large number of pictures, so you are encouraged to utilize more photos where possible.  (Do not utilize anything that you do not want displayed publicly in class with your entire family watching as well....)
+
+Your team will provide a demo in class during the last week of class.  Note that this means the demo is due before the report and code turn-in date.  Please plan accordingly.  For the in-class demo, the majority of your time should be devoted to discussing the design, but you should come prepared to demonstrate your file system at work.  
+
+Exact details for the demonstration will be forthcoming, but it will involve X forwarding of the Nautilus graphical browser to the classroom screen.
