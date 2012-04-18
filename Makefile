@@ -1,7 +1,16 @@
-.PHONY: clean
+CFLAGS := -Wall $(shell pkg-config fuse --cflags)
+LDFLAGS := $(shell pkg-config fuse --libs)
 
-clean :
-	-rm hello
+targets = hello #fusexmp fusexmp_fh hello hello_ll null
 
-hello : hello.c
-	gcc -lfuse -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=22 hello.c -o hello
+all: $(targets)
+
+hello: hello.c
+	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS)
+
+fusexmp_fh: fusexmp_fh.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -lulockmgr $< -o $@
+
+clean:
+	rm -f *.o
+	rm -f $(targets)
