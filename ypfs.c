@@ -40,6 +40,7 @@ typedef struct _node {
 	char* hash; // unique name
 	NODE_TYPE type;
 	struct _node ** children;
+	struct _node* parent;
 	int num_children;
 	struct stat attr;
 } * NODE;
@@ -49,7 +50,7 @@ typedef struct _node {
  */
 static NODE root;
 
-NODE init_node(const char* name, NODE_TYPE type)
+NODE init_node(const char* name, NODE_TYPE type, char* hash)
 {
 	NODE temp = malloc(sizeof(struct _node));
 	temp->name = malloc(sizeof(char) * (strlen(name) + 1));
@@ -58,10 +59,17 @@ NODE init_node(const char* name, NODE_TYPE type)
 	temp->children = NULL;
 	temp->num_children = 0;
 
-	if (type == NODE_FILE) {
+	if (type == NODE_FILE && hash == NULL) {
 		temp->hash = malloc(sizeof(char) * 100);
 		sprintf(temp->hash, "%lld", random() % 10000000000);
 	}
+
+	if (type == NODE_FILE && hash) {
+		temp->hash = malloc(sizeof(char) * 100);
+		sprintf(temp->hash, "%s", hash);
+
+	}
+
 
 	return temp;
 }
@@ -81,6 +89,8 @@ void add_child(NODE parent, NODE child)
 
 	parent->children = new_children;
 	parent->num_children = old_num + 1;
+
+	child->parent = parent;
 
 	free(old_children);
 }
@@ -108,6 +118,11 @@ void remove_child(NODE parent, NODE child)
 
 	free(old_children);
 	free(child);
+}
+
+void remove_node(NODE to_remove)
+{
+	remove_child(to_remove->parent, to_remove);
 }
 
 int elements_in_path(const char* path)
@@ -322,7 +337,7 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	while(*end != '\0') end++;
 	while(*end != '/' && end >= path) end--;
 	if (*end == '/') end++;
-	new_node = init_node(end, NODE_FILE);
+	new_node = init_node(end, NODE_FILE, NULL);
 	mylog("create");
 	add_child(root, new_node);
 	return ypfs_open(path, fi);
@@ -392,6 +407,38 @@ static int ypfs_truncate(const char *path, off_t offset)
 	return truncate(full_file_name, offset);
 }
 
+static int ypfs_unlink(const char *path)
+{
+	char full_file_name[1000];
+	NODE file_node = node_for_path(path);
+	mylog("unlink");
+	to_full_path(file_node->hash, full_file_name);
+
+	remove_node(file_node);
+
+	return unlink(full_file_name);
+}
+
+static int ypfs_rename(const char *from, const char *to)
+{
+	NODE old_node, new_node;
+	char* end = (char*)to;
+	mylog("rename");
+
+	old_node = node_for_path(from);
+
+	while(*end != '\0') end++;
+	while(*end != '/' && end >= to) end--;
+	if (*end == '/') end++;
+	new_node = init_node(end, NODE_FILE, old_node->hash);
+	add_child(root, new_node);
+
+	remove_node(old_node);
+
+	return 0;
+
+}
+
 static struct fuse_operations ypfs_oper = {
 	.getattr	= ypfs_getattr,
 	.readdir	= ypfs_readdir,
@@ -402,7 +449,9 @@ static struct fuse_operations ypfs_oper = {
 	.utimens	= ypfs_utimens,
 	.mknod		= ypfs_mknod,
 	.release	= ypfs_release,
-	.truncate	= ypfs_truncate
+	.truncate	= ypfs_truncate,
+	.unlink		= ypfs_unlink,
+	.rename		= ypfs_rename
 };
 
 int main(int argc, char *argv[])
@@ -410,7 +459,7 @@ int main(int argc, char *argv[])
 	mylog("===========start============");
 	srandom(time(NULL));
 	printf("mkdir: %d\n", mkdir("/home/dylangarrett/.ypfs", 0777));
-	root = init_node("/", NODE_DIR);
+	root = init_node("/", NODE_DIR, NULL);
 	//add_child(root, init_node("test", NODE_FILE));
 	return fuse_main(argc, argv, &ypfs_oper, NULL);
 }
