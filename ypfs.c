@@ -203,6 +203,8 @@ NODE _node_for_path(char* path, NODE curr)
 
 NODE node_for_path(const char* path) 
 {
+	//if (strcmp(path, "/") == 0)
+	//	return root;
         return _node_for_path((char*)path, root);
 }
 
@@ -212,16 +214,27 @@ NODE node_for_path(const char* path)
 static int ypfs_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
+	NODE file_node;
+	char full_file_name[1000];
+
 	mylog("getattr");
+
+	file_node = node_for_path(path);
+	if (file_node == NULL)
+		return -ENOENT;
+	to_full_path(file_node->hash, full_file_name);
+
 
 	memset(stbuf, 0, sizeof(struct stat));
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} else if (node_for_path(path) != NULL) {
-		stbuf->st_mode = S_IFREG | 0777;
+	} else if (file_node != NULL) {
+		/*stbuf->st_mode = S_IFREG | 0777;
 		stbuf->st_nlink = 1;
-		stbuf->st_size = strlen(hello_str);
+		stbuf->st_size = strlen(hello_str);*/
+		mylog(full_file_name);
+		stat(full_file_name, stbuf);
 	} else
 		res = -ENOENT;
 
@@ -262,7 +275,7 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 
 	//if ((fi->flags & 3) != O_RDONLY)
 	//	return -EACCES;
-	fi->fh = open(full_file_name, O_WRONLY | O_CREAT, 0666);
+	fi->fh = open(full_file_name, O_RDWR | O_CREAT, 0666);
 
 	if(fi->fh == -1) {
 	        mylog("fd == -1");
@@ -286,13 +299,18 @@ static int ypfs_read(const char *path, char *buf, size_t size, off_t offset,
 	if (file_node == NULL)
 		return -ENOENT;
 
-	len = strlen(hello_str);
+	size = pread(fi->fh, buf, size, offset);
+	
+	if (size < 0)
+		mylog("read error");
+
+	/*len = strlen(hello_str);
 	if (offset < len) {
 		if (offset + size > len)
 			size = len - offset;
 		memcpy(buf, hello_str + offset, size);
 	} else
-		size = 0;
+		size = 0;*/
 
 	return size;
 }
