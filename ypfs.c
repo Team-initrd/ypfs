@@ -60,7 +60,7 @@ NODE init_node(const char* name, NODE_TYPE type)
 
 	if (type == NODE_FILE) {
 		temp->hash = malloc(sizeof(char) * 100);
-		sprintf(temp->hash, "%d", rand() % 100000);
+		sprintf(temp->hash, "%lld", random() % 10000000000);
 	}
 
 	return temp;
@@ -251,13 +251,25 @@ static int ypfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 // from example
 static int ypfs_open(const char *path, struct fuse_file_info *fi)
 {
+	NODE file_node = node_for_path(path);
+	char full_file_name[1000];
+	to_full_path(file_node->hash, full_file_name);
+
 	mylog("open");
 
-	if (node_for_path(path) == NULL)
+	if (file_node == NULL)
 		return -ENOENT;
 
 	//if ((fi->flags & 3) != O_RDONLY)
 	//	return -EACCES;
+	fi->fh = open(full_file_name, O_WRONLY | O_CREAT, 0666);
+
+	if(fi->fh == -1) {
+	        mylog("fd == -1");
+	        return -errno;
+	}
+
+
 
 	return 0;
 }
@@ -268,9 +280,10 @@ static int ypfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	size_t len;
 	(void) fi;
+	NODE file_node = node_for_path(path);
 	mylog("read");
-	return 0;
-	if(strcmp(path, hello_path) != 0)
+	
+	if (file_node == NULL)
 		return -ENOENT;
 
 	len = strlen(hello_str);
@@ -294,13 +307,13 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	new_node = init_node(end, NODE_FILE);
 	mylog("create");
 	add_child(root, new_node);
-	return 0;
+	return ypfs_open(path, fi);
 }
 
 static int ypfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
 	FILE *new_file;
-	int fd;
+	//int fd;
 	int res;
 	char full_file_name[1000];
 	NODE file_node = node_for_path(path);
@@ -314,19 +327,19 @@ static int ypfs_write(const char *path, const char *buf, size_t size, off_t offs
 
 	fclose(new_file);*/
 
-	fd = open(full_file_name, O_WRONLY | O_CREAT, 0666);
+	/*fd = open(full_file_name, O_WRONLY | O_CREAT, 0666);
 	if(fd == -1) {
 		mylog("fd == -1");
 		return -errno;
-	}
+	}*/
 
-	res = pwrite(fd, buf, size, offset);
+	res = pwrite(fi->fh, buf, size, offset);
 	if(res == -1) {
 		mylog("pwrite error");
 		res = -errno;
 	}
 
-	close(fd);
+	//close(fd);
 
 	return res;
 }
@@ -344,6 +357,23 @@ static int ypfs_mknod(const char *path, mode_t mode, dev_t device)
 	return 0;
 }
 
+static int ypfs_release(const char *path, struct fuse_file_info *fi)
+{
+	close(fi->fh);
+	mylog("release");
+
+	return 0;
+}
+
+static int ypfs_truncate(const char *path, off_t offset)
+{
+	char full_file_name[1000];
+	NODE file_node = node_for_path(path);
+	mylog("truncate");
+	to_full_path(file_node->hash, full_file_name);
+	return truncate(full_file_name, offset);
+}
+
 static struct fuse_operations ypfs_oper = {
 	.getattr	= ypfs_getattr,
 	.readdir	= ypfs_readdir,
@@ -352,14 +382,17 @@ static struct fuse_operations ypfs_oper = {
 	.create		= ypfs_create,
 	.write		= ypfs_write,
 	.utimens	= ypfs_utimens,
-	.mknod		= ypfs_mknod
+	.mknod		= ypfs_mknod,
+	.release	= ypfs_release,
+	.truncate	= ypfs_truncate
 };
 
 int main(int argc, char *argv[])
 {
 	mylog("===========start============");
+	srandom(time(NULL));
 	printf("mkdir: %d\n", mkdir("/home/dylangarrett/.ypfs", 0777));
 	root = init_node("/", NODE_DIR);
-	add_child(root, init_node("test", NODE_FILE));
+	//add_child(root, init_node("test", NODE_FILE));
 	return fuse_main(argc, argv, &ypfs_oper, NULL);
 }
