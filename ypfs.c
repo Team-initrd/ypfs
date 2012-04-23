@@ -15,9 +15,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <libexif/exif-data.h>
 
-static const char *hello_str = "Hello World!\n";
-static const char *hello_path = "/hello";
+static int ypfs_rename(const char *from, const char *to);
+
 
 //FILE *log_file;
 //struct timeval time;
@@ -43,6 +44,7 @@ typedef struct _node {
 	struct _node* parent;
 	int num_children;
 	struct stat attr;
+	int open_count;
 } * NODE;
 
 /*
@@ -58,6 +60,7 @@ NODE init_node(const char* name, NODE_TYPE type, char* hash)
 	temp->type = type;
 	temp->children = NULL;
 	temp->num_children = 0;
+	temp->open_count = 0;
 
 	if (type == NODE_FILE && hash == NULL) {
 		temp->hash = malloc(sizeof(char) * 100);
@@ -290,12 +293,14 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 
 	//if ((fi->flags & 3) != O_RDONLY)
 	//	return -EACCES;
-	fi->fh = open(full_file_name, O_RDWR | O_CREAT, 0666);
+	fi->fh = open(full_file_name, fi->flags, 0666); //O_RDWR | O_CREAT
 
 	if(fi->fh == -1) {
 	        mylog("fd == -1");
 	        return -errno;
 	}
+
+	file_node->open_count++;
 
 
 
@@ -306,7 +311,7 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 static int ypfs_read(const char *path, char *buf, size_t size, off_t offset,
 		      struct fuse_file_info *fi)
 {
-	size_t len;
+	//size_t len;
 	(void) fi;
 	NODE file_node = node_for_path(path);
 	mylog("read");
@@ -345,7 +350,7 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
 static int ypfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
-	FILE *new_file;
+	//FILE *new_file;
 	//int fd;
 	int res;
 	char full_file_name[1000];
@@ -392,8 +397,30 @@ static int ypfs_mknod(const char *path, mode_t mode, dev_t device)
 
 static int ypfs_release(const char *path, struct fuse_file_info *fi)
 {
+	ExifData *ed;
+	ExifEntry *entry;
+	char full_file_name[1000];
+	NODE file_node = node_for_path(path);
+	char buf[1024];
+	to_full_path(file_node->hash, full_file_name);
 	close(fi->fh);
 	mylog("release");
+	file_node->open_count--;
+
+	// redetermine where the file goes
+	if (file_node->open_count <= 0) {
+		mylog("file completely closed; renaming");
+		ed = exif_data_new_from_file(full_file_name);
+		if (ed) {
+			entry = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_DATE_TIME);
+			exif_entry_get_value(entry, buf, sizeof(buf));
+			mylog("Tag content:");
+			mylog(buf);
+			ypfs_rename(path, buf);
+			exif_data_unref(ed);
+		}
+		//ypfs_rename(path, "/lol");
+	}
 
 	return 0;
 }

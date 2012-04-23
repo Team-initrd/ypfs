@@ -1,5 +1,5 @@
-CFLAGS := -Wall $(shell pkg-config fuse --cflags)
-LDFLAGS := $(shell pkg-config fuse --libs)
+CFLAGS := -Wall $(shell pkg-config fuse libexif --cflags)
+LDFLAGS := $(shell pkg-config fuse libexif --libs)
 
 targets = ypfs #fusexmp fusexmp_fh hello hello_ll null
 
