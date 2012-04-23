@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <libexif/exif-data.h>
+#include <stdbool.h>
+#include <time.h>
 
 static int ypfs_rename(const char *from, const char *to);
 
@@ -77,7 +79,7 @@ NODE init_node(const char* name, NODE_TYPE type, char* hash)
 	return temp;
 }
 
-void add_child(NODE parent, NODE child)
+NODE add_child(NODE parent, NODE child)
 {
 	struct _node **old_children = parent->children;
 	int old_num = parent->num_children;
@@ -96,6 +98,8 @@ void add_child(NODE parent, NODE child)
 	child->parent = parent;
 
 	free(old_children);
+
+	return child;
 }
 
 void remove_child(NODE parent, NODE child)
@@ -175,19 +179,20 @@ void to_full_path(const char* path, char* full)
 }
 
 
-NODE _node_for_path(char* path, NODE curr)
+NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* hash)
 {
 	/*int elements = elements_in_path(path);
 	char** split = malloc(sizeof(char*) * elements);
 	NODE curr = root;
 	int i = 0;
-	elements = split_path(path, split);
+	elements = split_path(path, split)))
 	for (i = 0; i < elements; i++) {
 		
 	}*/
 
 	char name[1000];
 	int i = 0;
+	bool last_node = false;
 
 	//mylog(path);
 
@@ -198,6 +203,9 @@ NODE _node_for_path(char* path, NODE curr)
 		name[i++] = *(path++);
 	}
 	name[i] = '\0';
+
+	if (*path == '\0')
+		last_node = true;
 
 	//mylog("name:");
 	//mylog(name);
@@ -212,10 +220,16 @@ NODE _node_for_path(char* path, NODE curr)
 		//mylog("comparing name to :");
 		//mylog(curr->children[i]->name);
 		if (0 == strcmp(name, curr->children[i]->name))
-			return _node_for_path(path, curr->children[i]);
+			return _node_for_path(path, curr->children[i], false, 0, NULL);
 	}
 
 	//mylog("node not found");
+	
+	// sorry about this weird line
+	if (create) {
+		return _node_for_path(path, add_child(curr, init_node(name, last_node ? type : NODE_DIR, hash)), create, type, hash);
+	}
+
 	return NULL;
 }
 
@@ -223,7 +237,28 @@ NODE node_for_path(const char* path)
 {
 	//if (strcmp(path, "/") == 0)
 	//	return root;
-        return _node_for_path((char*)path, root);
+        return _node_for_path((char*)path, root, false, 0, NULL);
+}
+
+NODE create_node_for_path(const char* path, NODE_TYPE type, char* hash)
+{
+	return _node_for_path((char*)path, root, true, type, hash);
+}
+
+
+void print_tree(NODE node)
+{
+	int i;
+	mylog(node->name);
+	for (i = 0; i < node->num_children; i++) {
+		print_tree(node->children[i]);
+	}
+}
+
+void print_full_tree()
+{
+	mylog("PRINTING TREE");
+	print_tree(root);
 }
 
 
@@ -244,7 +279,7 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 
 
 	memset(stbuf, 0, sizeof(struct stat));
-	if (strcmp(path, "/") == 0) {
+	if (file_node->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} else if (file_node != NULL) {
@@ -265,15 +300,17 @@ static int ypfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	int i;
 	(void) offset;
 	(void) fi;
+	NODE file_node;
+	file_node = node_for_path(path);
 	mylog("readdir");
-	if (strcmp(path, "/") != 0)
+	if (file_node == NULL)
 		return -ENOENT;
 
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
 	//filler(buf, hello_path + 1, NULL, 0);
-	for (i = 0; i < root->num_children; i++) {
-		filler(buf, root->children[i]->name, NULL, 0);
+	for (i = 0; i < file_node->num_children; i++) {
+		filler(buf, file_node->children[i]->name, NULL, 0);
 	}
 
 	return 0;
@@ -342,6 +379,13 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	while(*end != '\0') end++;
 	while(*end != '/' && end >= path) end--;
 	if (*end == '/') end++;
+
+	if (0 == strcmp(end, "debugtree")) {
+		print_full_tree();
+		return -1;
+	}
+
+
 	new_node = init_node(end, NODE_FILE, NULL);
 	mylog("create");
 	add_child(root, new_node);
@@ -402,6 +446,10 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 	char full_file_name[1000];
 	NODE file_node = node_for_path(path);
 	char buf[1024];
+	struct tm file_time;
+	char year[1024];
+	char month[1024];
+	char new_name[2048];
 	to_full_path(file_node->hash, full_file_name);
 	close(fi->fh);
 	mylog("release");
@@ -409,14 +457,19 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 
 	// redetermine where the file goes
 	if (file_node->open_count <= 0) {
-		mylog("file completely closed; renaming");
+		mylog("file completely closed; checking if renaming necessary");
 		ed = exif_data_new_from_file(full_file_name);
 		if (ed) {
 			entry = exif_content_get_entry(ed->ifd[EXIF_IFD_0], EXIF_TAG_DATE_TIME);
 			exif_entry_get_value(entry, buf, sizeof(buf));
 			mylog("Tag content:");
 			mylog(buf);
-			ypfs_rename(path, buf);
+			strptime(buf, "%Y:%m:%d %H:%M:%S", &file_time);
+			strftime(year, 1024, "%Y", &file_time);
+			strftime(month, 1024, "%B", &file_time);
+			sprintf(new_name, "/%s/%s/%s", year, month, file_node->name);
+			mylog(new_name);
+			ypfs_rename(path, new_name);
 			exif_data_unref(ed);
 		}
 		//ypfs_rename(path, "/lol");
@@ -448,7 +501,8 @@ static int ypfs_unlink(const char *path)
 
 static int ypfs_rename(const char *from, const char *to)
 {
-	NODE old_node, new_node;
+	NODE old_node;
+	NODE new_node;
 	char* end = (char*)to;
 	mylog("rename");
 
@@ -457,10 +511,12 @@ static int ypfs_rename(const char *from, const char *to)
 	while(*end != '\0') end++;
 	while(*end != '/' && end >= to) end--;
 	if (*end == '/') end++;
-	new_node = init_node(end, NODE_FILE, old_node->hash);
-	add_child(root, new_node);
+	//new_node = init_node(end, NODE_FILE, old_node->hash);
+	//add_child(root, new_node);
+	new_node = create_node_for_path(to, old_node->type, old_node->hash);
+	if (new_node != old_node)
+		remove_node(old_node);
 
-	remove_node(old_node);
 
 	return 0;
 
