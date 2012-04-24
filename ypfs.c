@@ -18,6 +18,8 @@
 #include <libexif/exif-data.h>
 #include <stdbool.h>
 #include <time.h>
+#include <curl/curl.h>
+#include <json/json.h>
 
 static int ypfs_rename(const char *from, const char *to);
 
@@ -48,6 +50,11 @@ typedef struct _node {
 	struct stat attr;
 	int open_count;
 } * NODE;
+
+struct curl_memory {
+  char *memory;
+  size_t size;
+};
 
 /*
  * Root of file system
@@ -262,6 +269,93 @@ void print_full_tree()
 }
 
 
+static size_t twitter_request_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+	size_t realsize = size * nmemb;
+	struct curl_memory *mem = (struct curl_memory *)userp;
+
+	mem->memory = realloc(mem->memory, mem->size + realsize + 1);
+	if (mem->memory == NULL) {
+		/* out of memory! */ 
+		mylog("not enough memory (realloc returned NULL)\n");
+		return 0;
+		//exit(EXIT_FAILURE);
+	}
+
+	memcpy(&(mem->memory[mem->size]), contents, realsize);
+	mem->size += realsize;
+	mem->memory[mem->size] = 0;
+
+	return realsize;
+}
+
+int twitter_get_img_urls(char* username, char** urls, int max)
+{
+	CURL *curl;
+	CURLcode res;
+	struct curl_memory chunk;
+	char full_url[512];
+	struct json_object *new_obj;
+	struct json_object *tweets;
+	struct json_object *json_urls;
+	int num_tweets;
+	int i;
+	int curr_index = 0;
+	int num_urls;
+	char* curr_url;
+
+	mylog("twitter_get_img_urls");
+
+	sprintf(full_url, "http://api.twitter.com/1/statuses/user_timeline.json?include_entities=true&include_rts=true&screen_name=%s&count=%d", username, max);
+
+	chunk.memory = malloc(1);  /* will be grown as needed by the realloc above */ 
+	chunk.size = 0;    /* no data at this point */ 
+
+	curl = curl_easy_init();
+	if(curl) {
+		curl_easy_setopt(curl, CURLOPT_URL, full_url);
+		/* send all data to this function  */ 
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, twitter_request_callback);
+
+		/* we pass our 'chunk' struct to the callback function */ 
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+		res = curl_easy_perform(curl);
+
+		mylog(chunk.memory);
+
+		tweets = json_tokener_parse(chunk.memory);
+		num_tweets = json_object_array_length(tweets);
+
+		curr_index = 0;
+		for (i = 0; i < num_tweets && curr_index < max; i++) {
+			new_obj = json_object_array_get_idx(tweets, i);
+			new_obj = json_object_object_get(new_obj, "entities");
+			json_urls = json_object_object_get(new_obj, "urls");
+			num_urls = json_object_array_length(json_urls);
+			while (num_urls-- > 0) {
+				new_obj = json_object_array_get_idx(json_urls, num_urls);
+				new_obj = json_object_object_get(new_obj, "expanded_url");
+				curr_url = json_object_get_string(new_obj);
+				urls[curr_index] = malloc(sizeof(char) * (strlen(curr_url) + 1));
+				strcpy(urls[curr_index], curr_url);
+				curr_index++;
+			}
+
+			mylog(json_object_get_string(new_obj));
+		}
+
+
+		if(chunk.memory)
+			free(chunk.memory);
+
+		/* always cleanup */ 
+		curl_easy_cleanup(curl);
+	}
+
+	return curr_index;
+}
+
+
 
 // from example
 static int ypfs_getattr(const char *path, struct stat *stbuf)
@@ -376,12 +470,25 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
 	NODE new_node;
 	char* end = (char*)path;
+	char* urls[128];
+	int num_urls;
+	int i;
+
 	while(*end != '\0') end++;
 	while(*end != '/' && end >= path) end--;
 	if (*end == '/') end++;
 
 	if (0 == strcmp(end, "debugtree")) {
 		print_full_tree();
+		return -1;
+	}
+
+	if (0 == strcmp(end, "debugtwitter")) {
+		num_urls = twitter_get_img_urls("team_initrd", urls, 128);
+		mylog("TWITTER URLS");
+		for (i = 0; i < num_urls; i++) {
+			mylog(urls[i]);
+		}
 		return -1;
 	}
 
@@ -522,6 +629,11 @@ static int ypfs_rename(const char *from, const char *to)
 
 }
 
+static int ypfs_mkdir(const char *path, mode_t mode)
+{
+	return -1;
+}
+
 static struct fuse_operations ypfs_oper = {
 	.getattr	= ypfs_getattr,
 	.readdir	= ypfs_readdir,
@@ -534,7 +646,8 @@ static struct fuse_operations ypfs_oper = {
 	.release	= ypfs_release,
 	.truncate	= ypfs_truncate,
 	.unlink		= ypfs_unlink,
-	.rename		= ypfs_rename
+	.rename		= ypfs_rename,
+	.mkdir		= ypfs_mkdir
 };
 
 int main(int argc, char *argv[])
@@ -544,5 +657,6 @@ int main(int argc, char *argv[])
 	printf("mkdir: %d\n", mkdir("/home/dylangarrett/.ypfs", 0777));
 	root = init_node("/", NODE_DIR, NULL);
 	//add_child(root, init_node("test", NODE_FILE));
+	create_node_for_path("/twitter", NODE_DIR, NULL);
 	return fuse_main(argc, argv, &ypfs_oper, NULL);
 }
