@@ -20,9 +20,10 @@
 #include <time.h>
 #include <curl/curl.h>
 #include <json/json.h>
+#include <pwd.h>
+#include <sys/types.h>
 
 static int ypfs_rename(const char *from, const char *to);
-
 
 //FILE *log_file;
 //struct timeval time;
@@ -55,6 +56,21 @@ struct curl_memory {
   char *memory;
   size_t size;
 };
+
+char configdir[256];
+
+// sets configdir to "/home/user/.ypfs"
+void get_configdir()
+{
+	struct passwd pw;
+	struct passwd *result;
+	char buf[256];
+
+	// use thread-safe getpwnam_r	
+	getpwuid_r(getuid(), &pw, buf, 256, &result);
+	strcpy(configdir, pw.pw_dir);
+	strcat(configdir, "/.ypfs");
+}
 
 /*
  * Root of file system
@@ -182,9 +198,8 @@ int split_path(const char* path, char** split)
 
 void to_full_path(const char* path, char* full)
 {
-	sprintf(full, "/home/dylangarrett/.ypfs/%s", path);
+	sprintf(full, "%s/%s", configdir, path);
 }
-
 
 NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* hash)
 {
@@ -654,7 +669,8 @@ int main(int argc, char *argv[])
 {
 	mylog("===========start============");
 	srandom(time(NULL));
-	printf("mkdir: %d\n", mkdir("/home/dylangarrett/.ypfs", 0777));
+	get_configdir();
+	printf("mkdir: %d\n", mkdir(configdir, 0777));
 	root = init_node("/", NODE_DIR, NULL);
 	//add_child(root, init_node("test", NODE_FILE));
 	create_node_for_path("/twitter", NODE_DIR, NULL);
