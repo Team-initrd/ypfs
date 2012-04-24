@@ -22,6 +22,7 @@
 #include <json/json.h>
 #include <pwd.h>
 #include <sys/types.h>
+#include <wand/MagickWand.h>
 
 static int ypfs_rename(const char *from, const char *to);
 
@@ -297,6 +298,38 @@ char* string_after_char(char* path, char after)
 	return NULL;
 }
 
+// converts the image given in node to the extension given in path
+// returns 0 if no conversion and 1 otherwise
+int convert_img(NODE node, char *path)
+{
+	char *nodeext = string_after_char(node->hash, '.');
+	char *pathext = string_after_char(path, '.');
+	
+	if (strcmp(nodeext, pathext))
+	{
+		MagickWand *mw;
+		char *out;
+		
+		// extra padding for 4 letter extension
+		out = malloc(strlen(node->hash) + 1);
+		strcpy(out, node->hash);
+		strcpy(string_after_char(out, '.'), pathext);
+		
+		MagickWandGenesis();
+		mw = NewMagickWand();
+		
+		MagickReadImage(mw, node->hash);
+		MagickWriteImage(mw, out);
+		
+		DestroyMagickWand(mw);
+		MagickWandTerminus();
+		
+		free(out);
+		return 1;
+	}
+	else
+		return 0;
+}
 
 static size_t twitter_request_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
