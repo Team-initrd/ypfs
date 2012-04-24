@@ -333,29 +333,36 @@ char* string_after_char(char* path, char after)
 // returns 0 if no conversion and 1 otherwise
 int convert_img(NODE node, char *path)
 {
-	char *nodeext = string_after_char(node->hash, '.');
+	char *nodeext = string_after_char(node->name, '.');
 	char *pathext = string_after_char(path, '.');
+
+	mylog("convert_img");
 	
-	if (strcmp(nodeext, pathext))
+	if (nodeext == NULL || pathext == NULL || strcmp(nodeext, pathext))
 	{
 		MagickWand *mw;
-		char *out;
-		
-		// extra padding for 4 letter extension
-		out = malloc(strlen(node->hash) + 1);
-		strcpy(out, node->hash);
-		strcpy(string_after_char(out, '.'), pathext);
-		
+		char out[1024];
+
 		MagickWandGenesis();
 		mw = NewMagickWand();
+		mylog("one");
+		// extra padding for 4 letter extension
+		//out = malloc(strlen(node->hash) + 1);
+		to_full_path(node->hash, out);
+		MagickReadImage(mw, out);
+		mylog("two");
+		strcat(out, ".");
+		strcat(out, pathext);
 		
-		MagickReadImage(mw, node->hash);
+		
 		MagickWriteImage(mw, out);
+		mylog("three");
 		
 		DestroyMagickWand(mw);
 		MagickWandTerminus();
+		mylog("four");
 		
-		free(out);
+		//free(out);
 		return 1;
 	}
 	else
@@ -546,9 +553,10 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 		return -ENOENT;
 	to_full_path(file_node_ignore_ext->hash, full_file_name);
 
-	if (file_node_ignore_ext != file_node) {
+	if (file_node_ignore_ext && file_node_ignore_ext->type == NODE_FILE && file_node_ignore_ext != file_node) {
 		// convert here, so file 1324242 becomes 1324242.png
 		mylog("EXTENSION DOESN'T MATCH; NEED TO CONVERT");
+		convert_img(file_node_ignore_ext, path);
 	}
 
 
