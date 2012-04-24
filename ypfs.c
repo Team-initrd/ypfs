@@ -369,6 +369,9 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 	// TODO
 	max = 20;
 
+	if (string_after_char(username, ' '))
+		return 0;
+
 	sprintf(full_url, "http://api.twitter.com/1/statuses/user_timeline.json?include_entities=true&include_rts=true&screen_name=%s&count=%d", username, max);
 
 	chunk.memory = malloc(1);  /* will be grown as needed by the realloc above */ 
@@ -387,6 +390,8 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 		mylog(chunk.memory);
 
 		tweets = json_tokener_parse(chunk.memory);
+		if (json_object_get_type(tweets) != json_type_array)
+			return 0;
 		num_tweets = json_object_array_length(tweets);
 
 		curr_index = 0;
