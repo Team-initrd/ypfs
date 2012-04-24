@@ -444,6 +444,7 @@ void twitter_grab_new_files_for_username(char* username)
 	char* name;
 	int i;
 	NODE node;
+	NODE existing_node;
 	char full_path[512];
 	char real_path[512];
 	CURL *curl;
@@ -464,6 +465,7 @@ void twitter_grab_new_files_for_username(char* username)
 		if (strcmp(string_after_char(urls[i], '.'), "jpg") == 0) {
 			name = string_after_char(urls[i], '/');
 			sprintf(full_path, "/twitter/%s/%s", username, name);
+			existing_node = node_for_path(full_path);
 			node = create_node_for_path(full_path, NODE_FILE, NULL);
 			to_full_path(node->hash, real_path);
 			mylog("hash:");
@@ -475,12 +477,14 @@ void twitter_grab_new_files_for_username(char* username)
 			mylog("name");
 			mylog(name);
 
-			fp = fopen(real_path,"wb");
-			curl_easy_setopt(curl, CURLOPT_URL, urls[i]);
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-			res = curl_easy_perform(curl);
-			fclose(fp);
+			if (existing_node == NULL) {
+				fp = fopen(real_path,"wb");
+				curl_easy_setopt(curl, CURLOPT_URL, urls[i]);
+				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+				curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+				res = curl_easy_perform(curl);
+				fclose(fp);
+			}
 		}
 	}
 	curl_easy_cleanup(curl);
@@ -575,6 +579,7 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 
 	// different extensions
 	if (strcmp(string_after_char(path, '.'), string_after_char(file_node->name, '.'))) {
+		strcat(full_file_name, ".");
 		strcat(full_file_name, string_after_char(path, '.'));
 	}
 
@@ -602,9 +607,11 @@ static int ypfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	//size_t len;
 	(void) fi;
-	NODE file_node = node_for_path(path);
+	NODE file_node;
 	mylog("read");
-	
+
+	file_node = node_ignore_extension(path);
+
 	if (file_node == NULL)
 		return -ENOENT;
 
@@ -663,7 +670,7 @@ static int ypfs_write(const char *path, const char *buf, size_t size, off_t offs
 	//int fd;
 	int res;
 	char full_file_name[1000];
-	NODE file_node = node_for_path(path);
+	NODE file_node = node_ignore_extension(path);
 	mylog("write");
 	to_full_path(file_node->hash, full_file_name);
 	mylog(full_file_name);
@@ -709,15 +716,17 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 	ExifData *ed;
 	ExifEntry *entry;
 	char full_file_name[1000];
-	NODE file_node = node_for_path(path);
+	NODE file_node = node_ignore_extension(path);
 	char buf[1024];
 	struct tm file_time;
 	char year[1024];
 	char month[1024];
 	char new_name[2048];
+
+	mylog("release");
+
 	to_full_path(file_node->hash, full_file_name);
 	close(fi->fh);
-	mylog("release");
 	file_node->open_count--;
 
 	// redetermine where the file goes
@@ -797,12 +806,9 @@ static int ypfs_mkdir(const char *path, mode_t mode)
 
 	if (strstr(path, "/twitter/")) {
 		// in twitter folder
-		mylog("one");
 		if (twitter_username == NULL)
 			return -1;
-mylog("two");
 		mylog(create_node_for_path(path, NODE_DIR, NULL)->name);
-		mylog("three");
 		return 0;
 
 	}
