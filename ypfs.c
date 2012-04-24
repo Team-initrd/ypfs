@@ -228,8 +228,8 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 	//mylog(path);
 	
 	ext = string_after_char(path, '.');
-	mylog("path extension to ignore");
-	mylog(ext);
+	//mylog("path extension to ignore");
+	//mylog(ext);
 
 
 	if (*path == '/')
@@ -242,8 +242,8 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 		name[i++] = *(path++);
 	}
 	name[i] = '\0';
-	mylog("name");
-	mylog(name);
+	//mylog("name");
+	//mylog(name);
 	
 
 	if (*path == '\0')
@@ -268,8 +268,8 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 			compare_name[n++] = *(curr_char++);
 		}
 		compare_name[n] = '\0';
-		mylog("compare_name");
-		mylog(compare_name);
+		//mylog("compare_name");
+		//mylog(compare_name);
 		if (0 == strcmp(name, compare_name))
 			return _node_for_path(path, curr->children[i], create, type, hash, ignore_ext);
 		*compare_name = '\0';
@@ -342,6 +342,7 @@ int convert_img(NODE node, char *path)
 	{
 		MagickWand *mw;
 		char out[1024];
+		struct stat buf;
 
 		MagickWandGenesis();
 		mw = NewMagickWand();
@@ -353,7 +354,16 @@ int convert_img(NODE node, char *path)
 		mylog("two");
 		strcat(out, ".");
 		strcat(out, pathext);
-		
+
+		if (stat( out, &buf ) == 0) {
+			// already converted
+			mylog("file already converted");
+			DestroyMagickWand(mw);
+			MagickWandTerminus();
+
+			return 0;
+		}
+
 		
 		MagickWriteImage(mw, out);
 		mylog("three");
@@ -557,6 +567,10 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 		// convert here, so file 1324242 becomes 1324242.png
 		mylog("EXTENSION DOESN'T MATCH; NEED TO CONVERT");
 		convert_img(file_node_ignore_ext, path);
+		// for stat later in function
+		strcat(full_file_name, ".");
+		strcat(full_file_name, string_after_char(path, '.'));
+		mylog(full_file_name);
 	}
 
 
