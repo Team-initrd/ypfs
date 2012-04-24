@@ -25,6 +25,7 @@
 #include <wand/MagickWand.h>
 
 static int ypfs_rename(const char *from, const char *to);
+char* string_after_char(char* path, char after);
 
 //FILE *log_file;
 //struct timeval time;
@@ -202,7 +203,7 @@ void to_full_path(const char* path, char* full)
 	sprintf(full, "%s/%s", configdir, path);
 }
 
-NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* hash)
+NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* hash, bool ignore_ext)
 {
 	/*int elements = elements_in_path(path);
 	char** split = malloc(sizeof(char*) * elements);
@@ -216,19 +217,34 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 	char name[1000];
 	int i = 0;
 	bool last_node = false;
+	char* ext;
+	char compare_name[1024];
+	char* curr_char;
+	int n = 0;
 
 	if (curr == NULL)
 		mylog("_node_for_path: curr == NULL");
 
 	//mylog(path);
+	
+	ext = string_after_char(path, '.');
+	mylog("path extension to ignore");
+	mylog(ext);
+
 
 	if (*path == '/')
 		path++;
+
 	
-	while(*path && *path != '/') {
+
+	i = 0;
+	while(*path && *path != '/' && ( ext == NULL || (path < ext-1 || !ignore_ext))) {
 		name[i++] = *(path++);
 	}
 	name[i] = '\0';
+	mylog("name");
+	mylog(name);
+	
 
 	if (*path == '\0')
 		last_node = true;
@@ -245,15 +261,25 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 	for (i = 0; i < curr->num_children; i++) {
 		//mylog("comparing name to :");
 		//mylog(curr->children[i]->name);
-		if (0 == strcmp(name, curr->children[i]->name))
-			return _node_for_path(path, curr->children[i], create, type, hash);
+		ext = string_after_char(curr->children[i]->name, '.');
+		curr_char = curr->children[i]->name;
+		n = 0;
+		while(*curr_char != '\0' && (ext == NULL || (!ignore_ext || curr_char < ext-1))) {
+			compare_name[n++] = *(curr_char++);
+		}
+		compare_name[n] = '\0';
+		mylog("compare_name");
+		mylog(compare_name);
+		if (0 == strcmp(name, compare_name))
+			return _node_for_path(path, curr->children[i], create, type, hash, ignore_ext);
+		*compare_name = '\0';
 	}
 
 	//mylog("node not found");
 	
 	// sorry about this weird line
 	if (create) {
-		return _node_for_path(path, add_child(curr, init_node(name, last_node ? type : NODE_DIR, hash)), create, type, hash);
+		return _node_for_path(path, add_child(curr, init_node(name, last_node ? type : NODE_DIR, hash)), create, type, hash, ignore_ext);
 	}
 
 	return NULL;
@@ -263,12 +289,17 @@ NODE node_for_path(const char* path)
 {
 	//if (strcmp(path, "/") == 0)
 	//	return root;
-        return _node_for_path((char*)path, root, false, 0, NULL);
+        return _node_for_path((char*)path, root, false, 0, NULL, false);
 }
 
 NODE create_node_for_path(const char* path, NODE_TYPE type, char* hash)
 {
-	return _node_for_path((char*)path, root, true, type, hash);
+	return _node_for_path((char*)path, root, true, type, hash, false);
+}
+
+NODE node_ignore_extension(const char* path)
+{
+	return _node_for_path((char*)path, root, false, 0, NULL, true);
 }
 
 
@@ -290,10 +321,10 @@ void print_full_tree()
 char* string_after_char(char* path, char after)
 {
 	char* end = path;
-	while (*(end++));
-	while(end >= path && *(end--) != after);
-	if (end != path)
-		return end + 2;
+	while (*end) end++;
+	while(end > path && *end != after) end--;
+	if (end != path || *end == after)
+		return end + 1;
 
 	return NULL;
 }
@@ -446,6 +477,7 @@ void twitter_grab_new_files_for_username(char* username)
 	char* name;
 	int i;
 	NODE node;
+	NODE existing_node;
 	char full_path[512];
 	char real_path[512];
 	CURL *curl;
@@ -466,6 +498,7 @@ void twitter_grab_new_files_for_username(char* username)
 		if (strcmp(string_after_char(urls[i], '.'), "jpg") == 0) {
 			name = string_after_char(urls[i], '/');
 			sprintf(full_path, "/twitter/%s/%s", username, name);
+			existing_node = node_for_path(full_path);
 			node = create_node_for_path(full_path, NODE_FILE, NULL);
 			to_full_path(node->hash, real_path);
 			mylog("hash:");
@@ -477,12 +510,14 @@ void twitter_grab_new_files_for_username(char* username)
 			mylog("name");
 			mylog(name);
 
-			fp = fopen(real_path,"wb");
-			curl_easy_setopt(curl, CURLOPT_URL, urls[i]);
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-			res = curl_easy_perform(curl);
-			fclose(fp);
+			if (existing_node == NULL) {
+				fp = fopen(real_path,"wb");
+				curl_easy_setopt(curl, CURLOPT_URL, urls[i]);
+				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+				curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+				res = curl_easy_perform(curl);
+				fclose(fp);
+			}
 		}
 	}
 	curl_easy_cleanup(curl);
@@ -495,14 +530,21 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
 	NODE file_node;
+	NODE file_node_ignore_ext;
 	char full_file_name[1000];
 
 	mylog("getattr");
 
 	file_node = node_for_path(path);
-	if (file_node == NULL)
+	file_node_ignore_ext = node_ignore_extension(path);
+	if (file_node_ignore_ext == NULL)
 		return -ENOENT;
-	to_full_path(file_node->hash, full_file_name);
+	to_full_path(file_node_ignore_ext->hash, full_file_name);
+
+	if (file_node_ignore_ext != file_node) {
+		// convert here, so file 1324242 becomes 1324242.png
+		mylog("EXTENSION DOESN'T MATCH; NEED TO CONVERT");
+	}
 
 
 	memset(stbuf, 0, sizeof(struct stat));
@@ -511,10 +553,10 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 		mylog(path);
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} else if (file_node->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
+	} else if (file_node_ignore_ext->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} else if (file_node != NULL) {
+	} else if (file_node_ignore_ext != NULL) {
 		/*stbuf->st_mode = S_IFREG | 0777;
 		stbuf->st_nlink = 1;
 		stbuf->st_size = strlen(hello_str);*/
@@ -554,14 +596,27 @@ static int ypfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 // from example
 static int ypfs_open(const char *path, struct fuse_file_info *fi)
 {
-	NODE file_node = node_for_path(path);
+	NODE file_node;
 	char full_file_name[1000];
-	to_full_path(file_node->hash, full_file_name);
 
 	mylog("open");
 
-	if (file_node == NULL)
-		return -ENOENT;
+
+	file_node = node_ignore_extension(path);
+
+	if (file_node == NULL)  
+		        return -ENOENT;
+
+
+	to_full_path(file_node->hash, full_file_name);
+
+	// different extensions
+	if (strcmp(string_after_char(path, '.'), string_after_char(file_node->name, '.'))) {
+		strcat(full_file_name, ".");
+		strcat(full_file_name, string_after_char(path, '.'));
+	}
+
+
 
 	//if ((fi->flags & 3) != O_RDONLY)
 	//	return -EACCES;
@@ -585,9 +640,11 @@ static int ypfs_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	//size_t len;
 	(void) fi;
-	NODE file_node = node_for_path(path);
+	NODE file_node;
 	mylog("read");
-	
+
+	file_node = node_ignore_extension(path);
+
 	if (file_node == NULL)
 		return -ENOENT;
 
@@ -646,7 +703,7 @@ static int ypfs_write(const char *path, const char *buf, size_t size, off_t offs
 	//int fd;
 	int res;
 	char full_file_name[1000];
-	NODE file_node = node_for_path(path);
+	NODE file_node = node_ignore_extension(path);
 	mylog("write");
 	to_full_path(file_node->hash, full_file_name);
 	mylog(full_file_name);
@@ -692,15 +749,17 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 	ExifData *ed;
 	ExifEntry *entry;
 	char full_file_name[1000];
-	NODE file_node = node_for_path(path);
+	NODE file_node = node_ignore_extension(path);
 	char buf[1024];
 	struct tm file_time;
 	char year[1024];
 	char month[1024];
 	char new_name[2048];
+
+	mylog("release");
+
 	to_full_path(file_node->hash, full_file_name);
 	close(fi->fh);
-	mylog("release");
 	file_node->open_count--;
 
 	// redetermine where the file goes
@@ -780,12 +839,9 @@ static int ypfs_mkdir(const char *path, mode_t mode)
 
 	if (strstr(path, "/twitter/")) {
 		// in twitter folder
-		mylog("one");
 		if (twitter_username == NULL)
 			return -1;
-mylog("two");
 		mylog(create_node_for_path(path, NODE_DIR, NULL)->name);
-		mylog("three");
 		return 0;
 
 	}
