@@ -201,6 +201,9 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 	int i = 0;
 	bool last_node = false;
 
+	if (curr == NULL)
+		mylog("_node_for_path: curr == NULL");
+
 	//mylog(path);
 
 	if (*path == '/')
@@ -227,7 +230,7 @@ NODE _node_for_path(char* path, NODE curr, bool create, NODE_TYPE type, char* ha
 		//mylog("comparing name to :");
 		//mylog(curr->children[i]->name);
 		if (0 == strcmp(name, curr->children[i]->name))
-			return _node_for_path(path, curr->children[i], false, 0, NULL);
+			return _node_for_path(path, curr->children[i], create, type, hash);
 	}
 
 	//mylog("node not found");
@@ -268,6 +271,17 @@ void print_full_tree()
 	print_tree(root);
 }
 
+char* string_after_char(char* path, char after)
+{
+	char* end = path;
+	while (*(end++));
+	while(end >= path && *(end--) != after);
+	if (end != path)
+		return end + 2;
+
+	return NULL;
+}
+
 
 static size_t twitter_request_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
@@ -306,6 +320,9 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 
 	mylog("twitter_get_img_urls");
 
+	// TODO
+	max = 20;
+
 	sprintf(full_url, "http://api.twitter.com/1/statuses/user_timeline.json?include_entities=true&include_rts=true&screen_name=%s&count=%d", username, max);
 
 	chunk.memory = malloc(1);  /* will be grown as needed by the realloc above */ 
@@ -343,7 +360,7 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 
 			mylog(json_object_get_string(new_obj));
 		}
-
+		
 
 		if(chunk.memory)
 			free(chunk.memory);
@@ -353,6 +370,74 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 	}
 
 	return curr_index;
+}
+
+static char* twitter_username_for_path(char* path)
+{
+	char* username_start = path;
+	if(strstr(path, "/twitter/") == NULL)
+		return NULL;
+	username_start += strlen("/twitter/");
+
+	if ((strchr(username_start, '/') && strchr(username_start, '/')[1] != '\0') || *username_start == '\0')
+		return NULL;
+
+	return username_start;
+}
+
+size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+	int written;
+	written = fwrite(ptr, size, nmemb, stream);
+	return written;
+}
+
+void twitter_grab_new_files_for_username(char* username)
+{
+	char* urls[128];
+	int num_urls;
+	char* name;
+	int i;
+	NODE node;
+	char full_path[512];
+	char real_path[512];
+	CURL *curl;
+	FILE *fp;
+	CURLcode res;
+
+	curl = curl_easy_init();
+
+	if (curl == NULL)
+		return;
+
+	num_urls = twitter_get_img_urls(username, urls, 128);
+	for (i = 0; i < num_urls; i++) {
+		mylog("URL===");
+		mylog(urls[i]);
+		mylog("string_after_char");
+		mylog(string_after_char(urls[i], '.'));
+		if (strcmp(string_after_char(urls[i], '.'), "jpg") == 0) {
+			name = string_after_char(urls[i], '/');
+			sprintf(full_path, "/twitter/%s/%s", username, name);
+			node = create_node_for_path(full_path, NODE_FILE, NULL);
+			to_full_path(node->hash, real_path);
+			mylog("hash:");
+			mylog(node->hash);
+			mylog("real_path");
+			mylog(real_path);
+			mylog("full_path");
+			mylog(full_path);
+			mylog("name");
+			mylog(name);
+
+			fp = fopen(real_path,"wb");
+			curl_easy_setopt(curl, CURLOPT_URL, urls[i]);
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+			res = curl_easy_perform(curl);
+			fclose(fp);
+		}
+	}
+	curl_easy_cleanup(curl);
 }
 
 
@@ -373,7 +458,12 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 
 
 	memset(stbuf, 0, sizeof(struct stat));
-	if (file_node->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
+	if (twitter_username_for_path(path)) {
+		mylog("getattr for twitter user folder");
+		mylog(path);
+		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_nlink = 2;
+	} else if (file_node->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} else if (file_node != NULL) {
@@ -399,6 +489,9 @@ static int ypfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	mylog("readdir");
 	if (file_node == NULL)
 		return -ENOENT;
+
+	if (twitter_username_for_path(path))
+		twitter_grab_new_files_for_username(twitter_username_for_path(path));
 
 	filler(buf, ".", NULL, 0);
 	filler(buf, "..", NULL, 0);
@@ -631,6 +724,34 @@ static int ypfs_rename(const char *from, const char *to)
 
 static int ypfs_mkdir(const char *path, mode_t mode)
 {
+	char* twitter_username = twitter_username_for_path(path);
+
+	mylog("mkdir");
+	mylog(path);
+	mylog(twitter_username);
+
+	if (strstr(path, "/twitter/")) {
+		// in twitter folder
+		mylog("one");
+		if (twitter_username == NULL)
+			return -1;
+mylog("two");
+		mylog(create_node_for_path(path, NODE_DIR, NULL)->name);
+		mylog("three");
+		return 0;
+
+	}
+	return -1;
+}
+
+static int ypfs_opendir(const char *path, struct fuse_file_info *fi)
+{
+	NODE node = node_for_path(path);
+	mylog("opendir");
+
+	if (node && node->type == NODE_DIR)
+		return 0;
+
 	return -1;
 }
 
@@ -647,7 +768,8 @@ static struct fuse_operations ypfs_oper = {
 	.truncate	= ypfs_truncate,
 	.unlink		= ypfs_unlink,
 	.rename		= ypfs_rename,
-	.mkdir		= ypfs_mkdir
+	.mkdir		= ypfs_mkdir,
+	.opendir	= ypfs_opendir
 };
 
 int main(int argc, char *argv[])
@@ -658,5 +780,6 @@ int main(int argc, char *argv[])
 	root = init_node("/", NODE_DIR, NULL);
 	//add_child(root, init_node("test", NODE_FILE));
 	create_node_for_path("/twitter", NODE_DIR, NULL);
+	//create_node_for_path("/twitter/test", NODE_DIR, NULL);
 	return fuse_main(argc, argv, &ypfs_oper, NULL);
 }
