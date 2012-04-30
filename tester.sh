@@ -19,7 +19,7 @@ total=0
 while [ "$i" -lt "$num" ]
 do
  strt=`expr "\`date +%N\`" + 0`
- cp $src $dest$i
+ cp $src $i$dest
  end=`expr "\`date +%N\`" + 0`
  #let "strt /= 1000000"
  #let "end /= 1000000"
