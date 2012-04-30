@@ -610,11 +610,13 @@ void deserialize() {
 	mylog("start deserializing");
 
 	sprintf(file_name, "%s/ypfs.db", configdir);
-	serial_file = fopen(file_name, "r");
-
-	_deserialize(serial_file);
-
-	fclose(serial_file);
+	if ((serial_file = fopen(file_name, "r")))
+	{
+		_deserialize(serial_file);
+		fclose(serial_file);
+	}
+	else
+		mylog("serial file not found");
 }
 
 
