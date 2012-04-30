@@ -150,11 +150,15 @@ void remove_child(NODE parent, NODE child)
 
 	parent->children = new_children;
 	parent->num_children = old_num - 1;
-
+	//mylog("test============");
 	free(old_children);
+	//mylog("one");
 	free(child->name);
+	//mylog("two");
 	free(child->hash);
+	//mylog("three");
 	free(child);
+	//mylog("======test");
 }
 
 void remove_node(NODE to_remove)
@@ -988,6 +992,27 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 			mylog(new_name);
 			ypfs_rename(path, new_name);
 			exif_data_unref(ed);
+		} else {
+			int num_slashes = 0;
+			int i;
+			time_t rawtime;
+
+			for (i = 0; i < strlen(path); i++) {
+				if (path[i] == '/')
+					num_slashes++;
+			}
+			// in root
+			if (num_slashes == 1) {
+				struct tm * now_time;
+				time(&rawtime);
+				now_time = localtime(&rawtime);
+				strftime(year, 1024, "%Y", now_time);
+				strftime(month, 1024, "%B", now_time);
+				sprintf(new_name, "/%s/%s/%s", year, month, file_node->name);
+				mylog(new_name);
+				ypfs_rename(path, new_name);
+
+			}
 		}
 		//ypfs_rename(path, "/lol");
 		//
@@ -1049,10 +1074,11 @@ static int ypfs_rename(const char *from, const char *to)
 	//new_node = init_node(end, NODE_FILE, old_node->hash);
 	//add_child(root, new_node);
 	new_node = create_node_for_path(to, old_node->type, old_node->hash);
+	mylog("test 1");
 	if (new_node != old_node)
 		remove_node(old_node);
 
-
+	mylog("test 2");
 	return 0;
 
 }
