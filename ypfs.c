@@ -552,6 +552,12 @@ void _serialize(FILE* file, char* path, NODE curr) {
 	
 	mylog("serialize");
 
+	if (curr->type == NODE_FILE) {
+		fprintf(file, "%s %s\n", path, curr->hash);
+		path[end_of_path] = '\0';
+		return;
+	}
+
 	for (i = 0; i < curr->num_children; i++) {
 		strcat(path, "/");
 		strcat(path, curr->children[i]->name);
@@ -559,10 +565,6 @@ void _serialize(FILE* file, char* path, NODE curr) {
 		path[end_of_path] = '\0';
 	}
 
-	if (curr->type == NODE_FILE) {
-		fprintf(file, "%s/%s %s\n", path, curr->name, curr->hash);
-		path[end_of_path] = '\0';
-	}
 }
 
 void serialize() {
@@ -582,8 +584,27 @@ void serialize() {
 	fclose(serial_file);
 }
 
-void deserialize(FILE* fi) {
-	
+void _deserialize(FILE* file) {
+	char full_path[1024];
+	char hash[1024];
+
+	while (0 < fscanf(file, "%s %s\n", full_path, hash)) {
+		create_node_for_path(full_path, NODE_FILE, hash);
+	}
+}
+
+void deserialize() {
+	FILE* serial_file;
+	char file_name[1024];
+
+	mylog("start deserializing");
+
+	sprintf(file_name, "%s/ypfs.db", configdir);
+	serial_file = fopen(file_name, "r");
+
+	_deserialize(serial_file);
+
+	fclose(serial_file);
 }
 
 
@@ -760,6 +781,11 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 
 	if (0 == strcmp(end, "debugserialize")) {
 		serialize();
+		return -1;
+	}
+
+	if (0 == strcmp(end, "debugdeserialize")) {
+		deserialize();
 		return -1;
 	}
 
