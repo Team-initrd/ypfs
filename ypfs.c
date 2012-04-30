@@ -785,6 +785,7 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		mylog("TWITTER URLS");
 		for (i = 0; i < num_urls; i++) {
 			mylog(urls[i]);
+			free(urls[i]);
 		}
 		return -1;
 	}
