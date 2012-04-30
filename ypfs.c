@@ -546,6 +546,47 @@ void twitter_grab_new_files_for_username(char* username)
 }
 
 
+void _serialize(FILE* file, char* path, NODE curr) {
+	int end_of_path = strlen(path);
+	int i;
+	
+	mylog("serialize");
+
+	for (i = 0; i < curr->num_children; i++) {
+		strcat(path, "/");
+		strcat(path, curr->children[i]->name);
+		_serialize(file, path, curr->children[i]);
+		path[end_of_path] = '\0';
+	}
+
+	if (curr->type == NODE_FILE) {
+		fprintf(file, "%s/%s %s\n", path, curr->name, curr->hash);
+		path[end_of_path] = '\0';
+	}
+}
+
+void serialize() {
+	FILE* serial_file;
+	char file_name[1024];
+	char temp_path[1024];
+
+	mylog("start serializing");
+
+	temp_path[0] = '\0';
+
+	sprintf(file_name, "%s/ypfs.db", configdir);
+	serial_file = fopen(file_name, "w");
+
+	_serialize(serial_file, temp_path, root);
+
+	fclose(serial_file);
+}
+
+void deserialize(FILE* fi) {
+	
+}
+
+
 
 // from example
 static int ypfs_getattr(const char *path, struct stat *stbuf)
@@ -714,6 +755,11 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		for (i = 0; i < num_urls; i++) {
 			mylog(urls[i]);
 		}
+		return -1;
+	}
+
+	if (0 == strcmp(end, "debugserialize")) {
+		serialize();
 		return -1;
 	}
 
