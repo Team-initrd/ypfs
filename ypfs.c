@@ -23,14 +23,15 @@
 #include <pwd.h>
 #include <sys/types.h>
 #include <wand/MagickWand.h>
+#include <dirent.h>
 
 static int ypfs_rename(const char *from, const char *to);
-char* string_after_char(char* path, char after);
+char* string_after_char(const char* path, char after);
 
 //FILE *log_file;
 //struct timeval time;
 
-void mylog(char* log_str)
+void mylog(const char* log_str)
 {
 	FILE *log_file;
 	struct timeval time;
@@ -52,6 +53,7 @@ typedef struct _node {
 	int num_children;
 	struct stat attr;
 	int open_count;
+	//char* last_edited_ext;
 } * NODE;
 
 struct curl_memory {
@@ -88,6 +90,7 @@ NODE init_node(const char* name, NODE_TYPE type, char* hash)
 	temp->children = NULL;
 	temp->num_children = 0;
 	temp->open_count = 0;
+	//temp->last_edited_ext = NULL;
 
 	if (type == NODE_FILE && hash == NULL) {
 		temp->hash = malloc(sizeof(char) * 100);
@@ -320,9 +323,9 @@ void print_full_tree()
 	print_tree(root);
 }
 
-char* string_after_char(char* path, char after)
+char* string_after_char(const char* path, char after)
 {
-	char* end = path;
+	char* end = (char*)path;
 	while (*end) end++;
 	while(end > path && *end != after) end--;
 	if (end != path || *end == after)
@@ -479,7 +482,7 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 	return curr_index;
 }
 
-static char* twitter_username_for_path(char* path)
+static char* twitter_username_for_path(const char* path)
 {
 	char* username_start = path;
 	if(strstr(path, "/twitter/") == NULL)
@@ -620,6 +623,82 @@ void deserialize() {
 }
 
 
+void cleanup_conversions(const char* path)
+{
+	DIR* dot_dir;
+	struct dirent* curr_entry;
+	NODE node;
+	NODE real_node;
+
+	mylog("cleanup_conversions");
+	mylog(path);
+
+	node = node_ignore_extension(path);
+	real_node = node_for_path(path);
+
+	if (node == NULL) {
+		mylog("null node, nothing to clean up");
+		return;
+	}
+
+	dot_dir = opendir(configdir);
+
+	while(curr_entry = readdir(dot_dir)) {
+		char tempname[256];
+		char full_path[1024];
+
+		mylog(curr_entry->d_name);
+		sprintf(full_path, "%s/%s", configdir, curr_entry->d_name);
+		strcpy(tempname, curr_entry->d_name);
+		// remove file extension
+		mylog(tempname);
+		if(strchr(tempname, '.')) strchr(tempname, '.')[0] = '\0';
+		mylog("test");
+		if (0 != strcmp(tempname, node->hash)) {
+			mylog("continuing");
+			continue;
+		}
+
+		mylog("test 2");
+
+		if (node == real_node && string_after_char(curr_entry->d_name, '.')) {
+			mylog("unlinking 1");
+			unlink(full_path);
+		}
+
+		mylog("test 3");
+
+		// file ext is not original
+		if (node != real_node && string_after_char(path, '.') && string_after_char(curr_entry->d_name, '.') && strcmp(string_after_char(path, '.'), string_after_char(curr_entry->d_name, '.')) != 0) {
+			mylog("unlinking 2");
+			unlink(full_path);
+		}
+
+		mylog("test 4");
+
+		
+	}
+
+	if (node != real_node) {
+		char no_ext[1024];
+		char w_ext[1024];
+
+		mylog("node != real_node");
+
+		sprintf(no_ext, "%s/%s", configdir, node->hash);
+		sprintf(w_ext, "%s.%s", no_ext, string_after_char(path, '.'));
+		unlink(no_ext);
+		link(w_ext, no_ext);
+		unlink(w_ext);
+
+		// change in-mem file ext
+		strcpy(string_after_char(node->name, '.'), string_after_char(path, '.'));
+	}
+
+	closedir(dot_dir);
+}
+
+
 
 // from example
 static int ypfs_getattr(const char *path, struct stat *stbuf)
@@ -657,6 +736,11 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 	} else if (file_node_ignore_ext->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
+	} else if (file_node_ignore_ext != NULL && file_node != file_node_ignore_ext) {
+		mylog("getattr for non-original file ext");
+		stat(full_file_name, stbuf);
+		stbuf->st_mode = S_IFREG | 0444;
+		//stbuf->st_nlink = 1;
 	} else if (file_node_ignore_ext != NULL) {
 		/*stbuf->st_mode = S_IFREG | 0777;
 		stbuf->st_nlink = 1;
@@ -729,6 +813,7 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 	}
 
 	file_node->open_count++;
+
 
 
 
@@ -816,9 +901,13 @@ static int ypfs_write(const char *path, const char *buf, size_t size, off_t offs
 	int res;
 	char full_file_name[1000];
 	NODE file_node = node_ignore_extension(path);
+	NODE real_node = node_for_path(path);
 	mylog("write");
 	to_full_path(file_node->hash, full_file_name);
 	mylog(full_file_name);
+
+	if (file_node != real_node)
+		return -1;
 
 	/*new_file = fopen(full_file_name, "wb");
 
@@ -838,6 +927,15 @@ static int ypfs_write(const char *path, const char *buf, size_t size, off_t offs
 		res = -errno;
 	}
 
+
+	/*if (file_node->last_edited_ext)
+		free(file_node->last_edited_ext);
+	file_node->last_edited_ext = malloc(sizeof(char) * 64);
+	if (string_after_char(path, '.')) {
+		sprintf(file_node->last_edited_ext, "%s", string_after_char(path, '.'));
+	} else {
+		file_node->last_edited_ext[0] = '\0';
+	}*/
 	//close(fd);
 
 	return res;
@@ -892,6 +990,20 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 			exif_data_unref(ed);
 		}
 		//ypfs_rename(path, "/lol");
+		//
+
+		/*if (file_node->last_edited_ext){
+			char new_path[1024];
+			strcpy(new_path, path);
+			strcpy(string_after_char(new_path, '.'), file_node->last_edited_ext);
+			mylog("about to clean up conversions");
+			mylog(new_path);
+			cleanup_conversions(new_path);
+
+
+			free(file_node->last_edited_ext);
+			file_node->last_edited_ext = NULL;
+		}*/
 	}
 
 	return 0;
@@ -900,9 +1012,13 @@ static int ypfs_release(const char *path, struct fuse_file_info *fi)
 static int ypfs_truncate(const char *path, off_t offset)
 {
 	char full_file_name[1000];
-	NODE file_node = node_for_path(path);
+	NODE file_node = node_ignore_extension(path);
+	NODE real_node = node_for_path(path);
 	mylog("truncate");
 	to_full_path(file_node->hash, full_file_name);
+	if (file_node != real_node) {
+		strcat(full_file_name, strchr(path, '.'));
+	}
 	return truncate(full_file_name, offset);
 }
 
