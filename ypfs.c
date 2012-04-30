@@ -588,6 +588,8 @@ void _deserialize(FILE* file) {
 	char full_path[1024];
 	char hash[1024];
 
+	mylog("deserialize");
+
 	while (0 < fscanf(file, "%s %s\n", full_path, hash)) {
 		create_node_for_path(full_path, NODE_FILE, hash);
 	}
@@ -958,6 +960,18 @@ static int ypfs_opendir(const char *path, struct fuse_file_info *fi)
 	return -1;
 }
 
+static void* ypfs_init(struct fuse_conn_info *conn)
+{
+	deserialize();
+
+	return NULL;
+}
+
+static void ypfs_destroy(void * noidea)
+{
+	serialize();
+}
+
 static struct fuse_operations ypfs_oper = {
 	.getattr	= ypfs_getattr,
 	.readdir	= ypfs_readdir,
@@ -972,7 +986,9 @@ static struct fuse_operations ypfs_oper = {
 	.unlink		= ypfs_unlink,
 	.rename		= ypfs_rename,
 	.mkdir		= ypfs_mkdir,
-	.opendir	= ypfs_opendir
+	.opendir	= ypfs_opendir,
+	.init		= ypfs_init,
+	.destroy	= ypfs_destroy
 };
 
 int main(int argc, char *argv[])
