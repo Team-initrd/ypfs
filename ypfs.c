@@ -708,7 +708,6 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 	if (file_node == NULL)  
 		        return -ENOENT;
 
-
 	to_full_path(file_node->hash, full_file_name);
 
 	// different extensions
@@ -721,6 +720,7 @@ static int ypfs_open(const char *path, struct fuse_file_info *fi)
 
 	//if ((fi->flags & 3) != O_RDONLY)
 	//	return -EACCES;
+	
 	fi->fh = open(full_file_name, fi->flags, 0666); //O_RDWR | O_CREAT
 
 	if(fi->fh == -1) {
