@@ -149,6 +149,8 @@ void remove_child(NODE parent, NODE child)
 	parent->num_children = old_num - 1;
 
 	free(old_children);
+	free(child->name);
+	free(child->hash);
 	free(child);
 }
 
@@ -176,7 +178,7 @@ int elements_in_path(const char* path)
  * split - a pointer to an array of strings
  * returns number of strings split into
  */
-int split_path(const char* path, char** split)
+/*int split_path(const char* path, char** split)
 {
 	char* curr = (char*)path;
 	int elements = elements_in_path(path);
@@ -196,7 +198,7 @@ int split_path(const char* path, char** split)
 	}
 
 	return elements;
-}
+}*/
 
 void to_full_path(const char* path, char* full)
 {
@@ -441,7 +443,10 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 
 		tweets = json_tokener_parse(chunk.memory);
 		if (json_object_get_type(tweets) != json_type_array)
+		{
+			json_object_put(tweets);
 			return 0;
+		}
 		num_tweets = json_object_array_length(tweets);
 
 		curr_index = 0;
@@ -462,6 +467,7 @@ int twitter_get_img_urls(char* username, char** urls, int max)
 			mylog(json_object_get_string(new_obj));
 		}
 		
+		json_object_put(tweets);
 
 		if(chunk.memory)
 			free(chunk.memory);
@@ -540,6 +546,8 @@ void twitter_grab_new_files_for_username(char* username)
 				res = curl_easy_perform(curl);
 				fclose(fp);
 			}
+			
+			free(urls[i]);
 		}
 	}
 	curl_easy_cleanup(curl);
