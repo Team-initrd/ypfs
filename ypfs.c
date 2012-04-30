@@ -90,6 +90,7 @@ NODE init_node(const char* name, NODE_TYPE type, char* hash)
 	temp->children = NULL;
 	temp->num_children = 0;
 	temp->open_count = 0;
+	temp->hash = NULL;
 	//temp->last_edited_ext = NULL;
 
 	if (type == NODE_FILE && hash == NULL) {
@@ -151,13 +152,17 @@ void remove_child(NODE parent, NODE child)
 	parent->children = new_children;
 	parent->num_children = old_num - 1;
 	//mylog("test============");
-	free(old_children);
+	if (old_children)
+		free(old_children);
 	//mylog("one");
-	free(child->name);
+	if (child->name)
+		free(child->name);
 	//mylog("two");
-	free(child->hash);
+	if (child->hash)
+		free(child->hash);
 	//mylog("three");
-	free(child);
+	if (child)
+		free(child);
 	//mylog("======test");
 }
 
@@ -735,10 +740,13 @@ static int ypfs_getattr(const char *path, struct stat *stbuf)
 	if (twitter_username_for_path(path)) {
 		mylog("getattr for twitter user folder");
 		mylog(path);
+		stbuf->st_mode = S_IFDIR | 0444;
+		stbuf->st_nlink = 2;
+	} else if (file_node_ignore_ext->type == NODE_DIR && strstr(path, "twitter")) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
 	} else if (file_node_ignore_ext->type == NODE_DIR) { //if (strcmp(path, "/") == 0) {)
-		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_mode = S_IFDIR | 0444;
 		stbuf->st_nlink = 2;
 	} else if (file_node_ignore_ext != NULL && file_node != file_node_ignore_ext) {
 		mylog("getattr for non-original file ext");
@@ -861,10 +869,19 @@ static int ypfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	char* urls[128];
 	int num_urls;
 	int i;
+	int num_slashes = 0;
 
 	while(*end != '\0') end++;
 	while(*end != '/' && end >= path) end--;
 	if (*end == '/') end++;
+
+	for(i = 0; i < strlen(path); i++) {
+		if (path[i] == '/') num_slashes++;
+	}
+	// no writing to non=root or non-/twitter folders
+	if (num_slashes > 1 || strstr(path, "/twitter/")) {
+		return -1;
+	}
 
 	if (0 == strcmp(end, "debugtree")) {
 		print_full_tree();
